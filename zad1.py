@@ -84,6 +84,13 @@ def newtown(star1, star2):
     return ax, ay, az
 
 
+if thread_id == 0:
+    start = timer()
 result = parallel(stars)
+
+if thread_id == 0:
+    end = timer()
+    print(end-start)
+
 if result is not None:
-    print(result)
+    np.save("result.npy", result)

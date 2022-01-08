@@ -116,7 +116,13 @@ def newtown_2(star1, star2):
 
     return m2 * a, - m1 * a
 
-
+if thread_id == 0:
+    start = timer()
 result = parallel(stars)
+
+if thread_id == 0:
+    end = timer()
+    print(end-start)
+
 if result is not None:
-    print(result)
+    np.save("result.npy", result)

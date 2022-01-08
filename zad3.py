@@ -150,6 +150,5 @@ if thread_id == 0:
     end = timer()
     print(end-start)
 
-result = simulate(stars)
 if result is not None:
     np.save("result.npy", result)
