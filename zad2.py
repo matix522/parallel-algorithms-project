@@ -2,8 +2,9 @@
 
 from mpi4py import MPI
 import numpy as np
+import tqdm 
 
-global_stars_count = 800
+global_stars_count = 1800
 
 comm = MPI.COMM_WORLD
 thread_count = comm.Get_size()
@@ -29,27 +30,35 @@ def parallel(stars):
     acceleration = np.zeros(shape=(stars_count,3), dtype=np.float32)
 
     other_stars = np.zeros(shape=(buff_size, 4), dtype=np.float32)
-    other_stars[:my_star_count,:] = stars.copy()
+    other_stars_old = np.zeros(shape=(buff_size, 4), dtype=np.float32)
+    other_stars_old[:my_star_count,:] = stars.copy()
     other_acceleration = np.zeros(shape=(buff_size, 3), dtype=np.float32)
+    other_acceleration_old = np.zeros(shape=(buff_size, 3), dtype=np.float32)
 
-    for _i in range(int(np.ceil(thread_count / 2)) - 1):
-        comm.Send([other_stars, MPI.FLOAT], dest=next_thread)
-        comm.Send([other_acceleration, MPI.FLOAT], dest=next_thread)
-        comm.Recv([other_stars, MPI.FLOAT], source=prev_thread)
-        comm.Recv([other_acceleration, MPI.FLOAT], source=prev_thread)
+    iterations = range(int(np.ceil(thread_count / 2)) - 1)
+    
+    iterations = iterations if thread_id != 0 else tqdm.tqdm(iterations)
+    for _i in iterations:
+        comm.Isend([other_stars_old, MPI.FLOAT], dest=next_thread, tag = 1)
+        comm.Isend([other_acceleration_old, MPI.FLOAT], dest=next_thread, tag = 2)
+        comm.Recv([other_stars, MPI.FLOAT], source=prev_thread, tag = 1)
+        comm.Recv([other_acceleration, MPI.FLOAT], source=prev_thread, tag = 2)
         for i in range(my_star_count):
             for j in range(other_stars.shape[0]):
                 acceleration_i, acceleration_j = newtown_2(stars[i,:], other_stars[j,:])
                 acceleration[i,:] += acceleration_i
                 other_acceleration[j,:] += acceleration_j
+        other_stars_old, other_stars = other_stars, other_stars_old
+        other_acceleration_old, other_acceleration = other_acceleration, other_acceleration_old
 
     if thread_count % 2 == 0:
-        comm.Send([other_stars, MPI.FLOAT], dest=next_thread)
+        comm.Isend([other_stars_old, MPI.FLOAT], dest=next_thread)
         comm.Recv([other_stars, MPI.FLOAT], source=prev_thread)
         for i in range(my_star_count):
             for j in range(other_stars.shape[0]):
                 acceleration_i, _ = newtown_2(stars[i,:], other_stars[j,:])
                 acceleration[i,:] += acceleration_i
+        other_stars_old, other_stars = other_stars, other_stars_old
 
     other_acceleration_dest = thread_id - (int(np.ceil(thread_count / 2)) - 1)
     if other_acceleration_dest < 0:
@@ -57,10 +66,8 @@ def parallel(stars):
     other_acceleration_source = thread_id + (int(np.ceil(thread_count / 2)) - 1)
     if other_acceleration_source >= thread_count:
         other_acceleration_source -= thread_count
-    print(thread_id, other_acceleration_dest, other_acceleration_source)
-    # if thread_id == 0:
-    # print(thread_id, other_acceleration)
-    comm.Send([other_acceleration, MPI.FLOAT], dest=other_acceleration_dest)
+
+    comm.Isend([other_acceleration_old, MPI.FLOAT], dest=other_acceleration_dest)
     comm.Recv([other_acceleration, MPI.FLOAT], source=other_acceleration_source)
 
     for i in range(my_star_count):
@@ -72,7 +79,7 @@ def parallel(stars):
     acceleration[:,:] += other_acceleration[:my_star_count, :]
     
     if thread_id != 0:
-        comm.Send([acceleration, MPI.FLOAT], dest=0)
+        comm.Isend([acceleration, MPI.FLOAT], dest=0)
         return None
 
     total_acceleration = np.empty((global_stars_count,3), dtype=np.float32)
@@ -101,9 +108,9 @@ def newtown_2(star1, star2):
 
     dist_3 = dist ** 3
 
-    ax = (x1 - x2) / dist_3
-    ay = (y1 - y2) / dist_3
-    az = (z1 - z2) / dist_3
+    ax = (x2 - x1) / dist_3
+    ay = (y2 - y1) / dist_3
+    az = (z2 - z1) / dist_3
     a = np.array([ax, ay, az])
 
     return m2 * a, - m1 * a
