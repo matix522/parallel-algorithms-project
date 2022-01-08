@@ -94,7 +94,7 @@ def parallel(stars):
         total_acceleration[other_start_star:other_end_star,:] = other_acceleration[:other_size, :]
 
 
-    return total_acceleration
+    return G * total_acceleration
 
 
 def newtown_2(star1, star2):

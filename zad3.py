@@ -3,7 +3,7 @@
 from mpi4py import MPI
 import numpy as np
 
-global_stars_count = 800
+global_stars_count = 20
 
 comm = MPI.COMM_WORLD
 thread_count = comm.Get_size()
@@ -16,11 +16,50 @@ stars_count = end_star - start_star
 
 buff_size = int(np.ceil(global_stars_count / thread_count))
 
-stars = np.random.rand(stars_count,4)
-
+stars = np.array(np.random.rand(stars_count,4), dtype=np.float32) 
+stars[:,1:] -= 0.5
+stars[:,1:] *= 300
+stars[:, 0] *= 10e11
 G = 6.67408e-11
 
-def parallel(stars):
+def simulate(stars, steps = 1000, dt = 0.5):
+    # velocity = np.zeros(shape=(stars.shape[0], 3), dtype=np.float32)
+    velocity = np.array(np.random.rand(stars_count,3), dtype=np.float32) 
+    velocity -= 0.5
+    velocity *= 10 / np.log2(stars[:, 0])[:, np.newaxis]
+    acceleration = np.zeros(shape=(stars.shape[0], 3), dtype=np.float32)
+
+    simulation_snapshots = []
+
+    total_stars = np.empty((global_stars_count,4), dtype=np.float32) if thread_id == 0 else None
+    for i in range(steps):
+        acceleration = get_acceleration(stars)
+        # print(acceleration)
+        velocity -= acceleration * dt
+        stars[:, 1:] += velocity * dt
+
+
+        if thread_id != 0:
+            comm.Send([stars, MPI.FLOAT], dest=0)
+            continue
+
+        
+        total_stars[start_star:end_star,:] = stars
+
+        other_stars = np.empty((buff_size, 4), dtype=np.float32)
+        for i in range(1, thread_count): 
+            other_start_star = (i * global_stars_count) // thread_count
+            other_end_star = ((i+1) * global_stars_count) // thread_count
+            other_size = other_end_star-other_start_star
+            comm.Recv([other_stars[:other_size, :], MPI.FLOAT], source=i)
+            total_stars[other_start_star:other_end_star,:] = other_stars[:other_size, :]
+        simulation_snapshots.append(total_stars.copy())
+    if thread_id != 0:
+        return None
+    return np.array(simulation_snapshots)
+
+
+def get_acceleration(stars):
     my_star_count = stars.shape[0]
 
     prev_thread = thread_count - 1 if thread_id == 0 else thread_id - 1
@@ -57,7 +96,7 @@ def parallel(stars):
     other_acceleration_source = thread_id + (int(np.ceil(thread_count / 2)) - 1)
     if other_acceleration_source >= thread_count:
         other_acceleration_source -= thread_count
-    print(thread_id, other_acceleration_dest, other_acceleration_source)
+    # print(thread_id, other_acceleration_dest, other_acceleration_source)
     # if thread_id == 0:
     # print(thread_id, other_acceleration)
     comm.Send([other_acceleration, MPI.FLOAT], dest=other_acceleration_dest)
@@ -71,23 +110,23 @@ def parallel(stars):
             acceleration[i,:] += acceleration_i
     acceleration[:,:] += other_acceleration[:my_star_count, :]
     
-    if thread_id != 0:
-        comm.Send([acceleration, MPI.FLOAT], dest=0)
-        return None
+    # if thread_id != 0:
+    #     comm.Send([acceleration, MPI.FLOAT], dest=0)
+    #     return None
 
-    total_acceleration = np.empty((global_stars_count,3), dtype=np.float32)
-    total_acceleration[start_star:end_star,:] = acceleration
+    # total_acceleration = np.empty((global_stars_count,3), dtype=np.float32)
+    # total_acceleration[start_star:end_star,:] = acceleration
 
-    other_acceleration = np.empty((buff_size, 3), dtype=np.float32)
-    for i in range(1, thread_count): 
-        other_start_star = (i * global_stars_count) // thread_count
-        other_end_star = ((i+1) * global_stars_count) // thread_count
-        other_size = other_end_star-other_start_star
-        comm.Recv([other_acceleration[:other_size, :], MPI.FLOAT], source=i)
-        total_acceleration[other_start_star:other_end_star,:] = other_acceleration[:other_size, :]
+    # other_acceleration = np.empty((buff_size, 3), dtype=np.float32)
+    # for i in range(1, thread_count): 
+    #     other_start_star = (i * global_stars_count) // thread_count
+    #     other_end_star = ((i+1) * global_stars_count) // thread_count
+    #     other_size = other_end_star-other_start_star
+    #     comm.Recv([other_acceleration[:other_size, :], MPI.FLOAT], source=i)
+    #     total_acceleration[other_start_star:other_end_star,:] = other_acceleration[:other_size, :]
 
 
-    return G * total_acceleration
+    return G * acceleration
 
 
 def newtown_2(star1, star2):
@@ -109,6 +148,6 @@ def newtown_2(star1, star2):
     return m2 * a, - m1 * a
 
 
-result = parallel(stars)
+result = simulate(stars)
 if result is not None:
-    print(result)
+    np.save("result.npy", result)
