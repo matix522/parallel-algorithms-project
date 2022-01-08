@@ -3,8 +3,9 @@
 from mpi4py import MPI
 import numpy as np
 import tqdm 
-
-global_stars_count = 1800
+import sys
+from timeit import default_timer as timer
+global_stars_count = int(sys.argv[1])
 
 comm = MPI.COMM_WORLD
 thread_count = comm.Get_size()
